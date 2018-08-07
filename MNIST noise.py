@@ -40,34 +40,29 @@ def my_loss(y_true, y_pred):
     
     return lambda_val*bce
 
-# =============================================================================
-# not using 'scaled_distortion' fn
-# =============================================================================
 
-def scaled_distortion(gen_img, image_batch):
-    
-    # upper bound excluded
-    
-    sum = 0
 
-    for i in range (100): # for the 100 images in a batch
+#def scaled_distortion(gen_img, image_batch):
+#    
+#    # upper bound excluded
+#    
+#    sum = 0
+#
+#    for i in range (100): # for the 100 images in a batch
+#
+#        for j in range (784): 
+#        
+#            sum = sum + gen_img[i][j]*image_batch[i][j] + (1 - gen_img[i][j])*(1 - image_batch[i][j])
+#        
+#    distortion = sum / 784
+#    
+#    distortion = distortion * -1
+#    
+#    return lambda_val * distortion
+#    
 
-        for j in range (784): 
-        
-            sum = sum + gen_img[i][j]*image_batch[i][j] + (1 - gen_img[i][j])*(1 - image_batch[i][j])
-        
-    distortion = sum / 784
-    
-    distortion = distortion * -1
-    
-    return lambda_val * distortion
-    
 
-# =============================================================================
-# code stuck when calling scaled_distortion
-# =============================================================================
-
-loss_ppan = [scaled_distortion, adversary_loss]
+#loss_ppan = [scaled_distortion, adversary_loss]
 
 
 def load_mnist_data():
@@ -105,7 +100,7 @@ def get_mechanism():
     
     mechanism.add(Dense(784, activation = 'sigmoid'))
     
-    mechanism.compile(loss = 'mse', optimizer = Adam(lr = learning_rate))
+    mechanism.compile(loss = 'kullback_leibler_divergence', optimizer = Adam(lr = learning_rate))
 
     
     return mechanism
@@ -139,6 +134,11 @@ def get_ppan_network (random_dim, mechanism, adversary):
     
 
     # only want to train either mechanism or adversary, one at a time
+    
+# =============================================================================
+#   Q  Only called .trainable once - getting error saying trainable called without
+#       being compiled straight after. Is this correct? 
+# =============================================================================
     adversary.trainable = False
 
  
@@ -164,6 +164,10 @@ def get_ppan_network (random_dim, mechanism, adversary):
     # need O/P for each loss fn
     # at the end of each train_on_batch, model should compute its loss func
     ppan = Model(inputs = ppan_input, outputs = [gen_img, pred_label])
+    
+# =============================================================================
+#    Q Is the loss implemented correctly?
+# =============================================================================
        
     ppan.compile(loss = [my_loss, adversary_loss], optimizer = Adam(lr = learning_rate), metrics = ['accuracy'])
     
@@ -275,13 +279,14 @@ def train(epochs = nb_epochs, batch_size = batch):
            
             # want adversary to think the generated images (with noise) correspond to the predicted labels
             
-            adv_loss = adversary.train_on_batch(gen_img, y_train[rand_num])
-            print ('adv loss is:')
-            print (adv_loss)
-    
-            ppan_loss = ppan.train_on_batch(np.hstack([image_batch, noise]), [gen_img, y_train[rand_num]])
-            print ('ppan loss is:')
-            print (ppan_loss)
+# =============================================================================
+#             Q Are the 'train_on_batch' methods implemented correctly?
+# =============================================================================
+            
+            adversary.train_on_batch(gen_img, y_train[rand_num])
+           
+            ppan.train_on_batch(np.hstack([image_batch, noise]), [gen_img, y_train[rand_num]])
+            
         
     
         if (e == 1 or e%2 == 0):
