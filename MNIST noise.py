@@ -20,22 +20,54 @@ batch = 100
 nb_epochs = 50
 learning_rate = 0.0002
 noise_dim = 20
+lambda_val = 35
 
 def adversary_loss(y_true, y_pred):    
     
-# =============================================================================
-#     smallest loss when y_pred = 0.1 - shouldn't this be log(K.mean...)?
-# =============================================================================
-    
+    # K mean in range of 0 to 1
+    # taking log would give negative answer :(
+    # negative loss function => +ve feedback
+
     return K.mean(K.abs(0.1 - y_pred))
 
+delta = 0.1
+
+def my_loss(y_true, y_pred):
+    
+    bce = K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
+    
+    bce = K.square(K.maximum(0., bce - delta))
+    
+    return lambda_val*bce
 
 # =============================================================================
-# instead of binary_corssentropy (in loss_ppan), do I need 
-# to define the specified distortion (d), scaled by lambda?
+# not using 'scaled_distortion' fn
 # =============================================================================
 
-loss_ppan = ['binary_crossentropy', adversary_loss]
+def scaled_distortion(gen_img, image_batch):
+    
+    # upper bound excluded
+    
+    sum = 0
+
+    for i in range (100): # for the 100 images in a batch
+
+        for j in range (784): 
+        
+            sum = sum + gen_img[i][j]*image_batch[i][j] + (1 - gen_img[i][j])*(1 - image_batch[i][j])
+        
+    distortion = sum / 784
+    
+    distortion = distortion * -1
+    
+    return lambda_val * distortion
+    
+
+# =============================================================================
+# code stuck when calling scaled_distortion
+# =============================================================================
+
+loss_ppan = [scaled_distortion, adversary_loss]
 
 
 def load_mnist_data():
@@ -73,7 +105,7 @@ def get_mechanism():
     
     mechanism.add(Dense(784, activation = 'sigmoid'))
     
-    mechanism.compile(loss = 'kullback_leibler_divergence', optimizer = Adam(lr = learning_rate))
+    mechanism.compile(loss = 'mse', optimizer = Adam(lr = learning_rate))
 
     
     return mechanism
@@ -128,12 +160,12 @@ def get_ppan_network (random_dim, mechanism, adversary):
     
     # add a pred_valid when using the discriminator 
     # generated image
-# =============================================================================
-#     why does ppan need 2 O/Ps?
-# =============================================================================
+
+    # need O/P for each loss fn
+    # at the end of each train_on_batch, model should compute its loss func
     ppan = Model(inputs = ppan_input, outputs = [gen_img, pred_label])
        
-    ppan.compile(loss = loss_ppan, optimizer = Adam(lr = learning_rate), metrics = ['accuracy'])
+    ppan.compile(loss = [my_loss, adversary_loss], optimizer = Adam(lr = learning_rate), metrics = ['accuracy'])
     
     ppan.summary()
     
@@ -165,11 +197,11 @@ def plot_generated_images(epoch, mechanism, adversary,examples = 100, dim = (10,
 
         noisy_images = mechanism.predict(stack)
         
-        print ('predicting image label')
+#        print ('predicting image label')
         
-        pred = adversary.predict(noisy_images)
+#        pred = adversary.predict(noisy_images)
     
-        print(pred)
+#        print(pred)
     
         noisy_images = noisy_images.reshape(examples, 28, 28)
         
@@ -214,6 +246,8 @@ def train(epochs = nb_epochs, batch_size = batch):
     
     adversary = get_adversary()
 
+    # train the adversary (multiclass)
+    adv_loss = adversary.train_on_batch(x_train, y_train)
     
     ppan = get_ppan_network(noise_dim, mechanism, adversary)
     
@@ -234,47 +268,20 @@ def train(epochs = nb_epochs, batch_size = batch):
             
             noise = np.random.uniform(low = -1, high = 1, size = [batch, noise_dim])
             
-            generated_images = mechanism.predict(np.hstack([image_batch, noise]))
+             # hstack stacks arrays columnwise (will be 100 x 804, which is the desired I/P)
+            gen_img = mechanism.predict(np.hstack([image_batch, noise]))
             
-            generated_images = np.clip(generated_images, 0, 1)
+            gen_img = np.clip(gen_img, 0, 1)
            
-            
-            if (e == 1):
-                
-                # train adversary on real MNIST data
-                print ('going to train adversary on REAL data')
-                
-# =============================================================================
-#               training for a very long time! 
-#               why don't I place this under 'adversary = get_adversary()' (line 212)?
-# =============================================================================
-                
-                adversary.train_on_batch(x_train, y_train)
-                
-                print ('completed adversary training on real data')
-                
-                
-            
-            else:
-
-            # generate noisy MNIST images
-            # hstack stacks arrays columnwise (will be 100 x 804, which is the desired I/P)
-                
-            # train the adversary (multiclass)
-              
             # want adversary to think the generated images (with noise) correspond to the predicted labels
             
-# =============================================================================
-#             do I need to freeze the weights of the adversary here?
-#             I just want to modify the noise. The adversary is already trained              
-# =============================================================================
-            
-                adversary.train_on_batch(generated_images, y_train[rand_num])
-                
-                
+            adv_loss = adversary.train_on_batch(gen_img, y_train[rand_num])
+            print ('adv loss is:')
+            print (adv_loss)
     
-            ppan.train_on_batch(np.hstack([image_batch, noise]), [generated_images, y_train[rand_num]])
-            
+            ppan_loss = ppan.train_on_batch(np.hstack([image_batch, noise]), [gen_img, y_train[rand_num]])
+            print ('ppan loss is:')
+            print (ppan_loss)
         
     
         if (e == 1 or e%2 == 0):
